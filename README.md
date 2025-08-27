@@ -317,7 +317,7 @@ function calculate(user: User, store: Store) {
 ## 1) Optimize for cognitive load, not line count
 
 * A “good” function is one you can read top-to-bottom without mental context switching.
-* Favor **one level of abstraction per function**: either orchestrate steps *or* implement a step, not both. (Keep this from the original.) ([GitHub][1])
+* Favor **one level of abstraction per function**: either orchestrate steps *or* implement a step, not both.
 
 **Heuristic**
 
@@ -327,7 +327,7 @@ function calculate(user: User, store: Store) {
 
 ## 2) Parameters: clarity over counting
 
-* Prefer **≤ 3–4 parameters**. If you need more, use a typed object to simulate named params. (Keep the named-object advice; drop the “2 or fewer ideally” absolutism.) ([GitHub][1])
+* Prefer **≤ 3–4 parameters**. If you need more, use a typed object to simulate named params.
 * Use destructuring only when it improves readability and makes used fields explicit; avoid over-destructuring that hides data flow.
 
 ```ts
@@ -345,7 +345,7 @@ function createUser(opts: CreateUserOpts) { /* ... */ }
 
 * Aim for **one reason to change** per function, but don’t explode code into dozens of 3-line wrappers. Extract when it buys you:
   a) a better name, b) reuse, or c) easier testing.
-* Keep “what vs. how” separate: top-level use-case (what), helpers (how). (Keep the spirit of “do one thing,” but with nuance.) ([GitHub][1])
+* Keep “what vs. how” separate: top-level use-case (what), helpers (how). 
 
 ```ts
 async function registerUser(req: Request) {
@@ -363,28 +363,38 @@ async function registerUser(req: Request) {
 * Avoid **boolean mode flags** that fork behavior; split into separate functions or strategy objects. (Keep this.) ([GitHub][1])
 
 ```ts
-function createTempFile(name: string) { return createFile(`./temp/${name}`); }
 // instead of createFile(name, /* temp */ true)
+function createTempFile(name: string) { 
+  return createFile(`./temp/${name}`); 
+}
+
+// guard clauses
+function getDiscount(user: User | null) {
+  if (!user) return 0;
+  if (!user.isActive) return 0;
+  if (user.orders <= 10) return 0;
+  return 0.1;
+}
 ```
 
 ## 5) Side effects: localize and label them
 
 * Keep pure transforms pure; push I/O and mutation to the **edges** (gateways/services).
-* Don’t share mutable state across unrelated functions. (Keep the “avoid side effects / centralize them” advice.) ([GitHub][1])
+* Don’t share mutable state across unrelated functions.
 
 ## 6) Names, readability, and discoverability
 
-* Names should state **intent and unit** of work (`addMonthToDate` > `addToDate`). (Keep.) ([GitHub][1])
+* Names should state **intent and unit** of work (`addMonthToDate` > `addToDate`).
 * If you need a long comment to explain a function, rename or refactor.
 
 ## 7) Polymorphism vs. conditionals (use with judgment)
 
 * Prefer polymorphism when conditionals encode **type-based** branching.
-* Don’t introduce inheritance/strategies if a couple well-named `if`s are clearer. (Keep the example’s spirit but remove absolutism.) ([GitHub][1])
+* Don’t introduce inheritance/strategies if a couple well-named `if`s are clearer.
 
 ## 8) DRY, but only with a correct abstraction
 
-* Remove duplication when a **stable** abstraction exists; otherwise duplication can be safer than a leaky “common” helper. (Soften the original’s “remove duplicate code” to prefer good abstractions.) ([GitHub][1])
+* Remove duplication when a **stable** abstraction exists; otherwise duplication can be safer than a leaky “common” helper. 
 
 ## 9) Errors and results
 
