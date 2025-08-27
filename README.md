@@ -1,7 +1,4 @@
-# clean-code-typescript [![Tweet](https://img.shields.io/twitter/url/http/shields.io.svg?style=social)](https://twitter.com/intent/tweet?text=Clean%20Code%20Typescript&url=https://github.com/labs42io/clean-code-typescript)
-
-Clean Code concepts adapted for TypeScript.  
-Inspired from [clean-code-javascript](https://github.com/ryanmcdermott/clean-code-javascript).
+# clean-code-typescript 
 
 ## Table of Contents
 
@@ -16,37 +13,6 @@ Inspired from [clean-code-javascript](https://github.com/ryanmcdermott/clean-cod
   9. [Error Handling](#error-handling)
   10. [Formatting](#formatting)
   11. [Comments](#comments)
-  12. [Translations](#translations)
-
-## Introduction
-
-![Humorous image of software quality estimation as a count of how many expletives
-you shout when reading code](https://www.osnews.com/images/comics/wtfm.jpg)
-
-Software engineering principles, from Robert C. Martin's book
-[*Clean Code*](https://www.amazon.com/Clean-Code-Handbook-Software-Craftsmanship/dp/0132350882),
-adapted for TypeScript. This is not a style guide. It's a guide to producing
-[readable, reusable, and refactorable](https://github.com/ryanmcdermott/3rs-of-software-architecture) software in TypeScript.
-
-Not every principle herein has to be strictly followed, and even fewer will be
-universally agreed upon. These are guidelines and nothing more, but they are
-ones codified over many years of collective experience by the authors of
-*Clean Code*.
-
-Our craft of software engineering is just a bit over 50 years old, and we are
-still learning a lot. When software architecture is as old as architecture
-itself, maybe then we will have harder rules to follow. For now, let these
-guidelines serve as a touchstone by which to assess the quality of the
-TypeScript code that you and your team produce.
-
-One more thing: knowing these won't immediately make you a better software
-developer, and working with them for many years doesn't mean you won't make
-mistakes. Every piece of code starts as a first draft, like wet clay getting
-shaped into its final form. Finally, we chisel away the imperfections when
-we review it with our peers. Don't beat yourself up for first drafts that need
-improvement. Beat up the code instead!
-
-**[⬆ back to top](#table-of-contents)**
 
 ## Variables
 
@@ -75,7 +41,7 @@ function between<T>(value: T, left: T, right: T): boolean {
 
 ### Use pronounceable variable names
 
-If you can’t pronounce it, you can’t discuss it without sounding like an idiot.
+If you can’t pronounce it, it’s hard to discuss clearly and review effectively.
 
 **Bad:**
 
@@ -243,10 +209,9 @@ function loadPages(count: number = 10) {
 
 **[⬆ back to top](#table-of-contents)**
 
-### Use enum to document the intent
+### Prefer union types over enums for intent
 
-Enums can help you document the intent of the code. For example when we are concerned about values being
-different rather than the exact value of those.
+Prefer unions of string literals (and `as const` objects) over enums when you need a small, closed set of values. Unions compose better with TypeScript’s type system and avoid runtime emit.
 
 **Bad:**
 
@@ -274,18 +239,20 @@ class Projector {
 **Good:**
 
 ```ts
-enum GENRE {
-  ROMANTIC,
-  DRAMA,
-  COMEDY,
-  DOCUMENTARY,
-}
+const GENRE = {
+  ROMANTIC: 'romantic',
+  DRAMA: 'drama',
+  COMEDY: 'comedy',
+  DOCUMENTARY: 'documentary',
+} as const;
+
+type Genre = typeof GENRE[keyof typeof GENRE];
 
 projector.configureFilm(GENRE.COMEDY);
 
 class Projector {
   // declaration of Projector
-  configureFilm(genre) {
+  configureFilm(genre: Genre) {
     switch (genre) {
       case GENRE.ROMANTIC:
         // some logic to be executed 
@@ -293,315 +260,198 @@ class Projector {
   }
 }
 ```
-
 **[⬆ back to top](#table-of-contents)**
+
+### Avoid booleans when they hide richer data
+
+Prefer storing/returning the underlying information rather than a lossy boolean when:
+
+- A boolean represents a one-time event: store a timestamp instead of `is_confirmed`. You can still derive the boolean by testing for null, but you keep useful “when” data. See: [That boolean should probably be something else](https://ntietz.com/blog/that-boolean-should-probably-be-something-else/).
+- Multiple booleans encode mutually exclusive status/role: use a single union/enum (e.g., `role: 'user' | 'admin' | 'guest' | 'superadmin'`) instead of `is_admin`, `is_guest`, …
+- A boolean return erases context (e.g., permission checks): return a discriminated union that can carry reasons.
+
+```ts
+type PermissionCheck =
+  | { kind: 'allowed' }
+  | { kind: 'not_permitted'; reason: string };
+
+function checkPermissions(user: User): PermissionCheck {
+  if (isAllowed(user)) return { kind: 'allowed' };
+  return { kind: 'not_permitted', reason: 'Requires admin role' };
+}
+```
+
+Use booleans as short-lived intermediates to name complex conditionals, not as your long-term data model.
+
+Example (job status enum vs. multiple booleans):
+
+```ts
+type JobStatus = 'queued' | 'in_progress' | 'failed' | 'completed';
+
+type Job = {
+  id: string;
+  status: JobStatus;
+  queuedAt: Date;
+  startedAt?: Date;
+  finishedAt?: Date;
+};
+```
+
+Example (boolean as a readable intermediate):
+
+```ts
+function calculate(user: User, store: Store) {
+  const canProceed = isEligible(user) && (store.ready() || !store.paused());
+  if (canProceed && store.ready()) {
+    // ...
+  } else if (canProceed && store.inProgress()) {
+    // ...
+  } else {
+    // ...
+  }
+}
+```
 
 ## Functions
 
-### Function arguments (2 or fewer ideally)
+## 1) Optimize for cognitive load, not line count
 
-Limiting the number of function parameters is incredibly important because it makes testing your function easier.
-Having more than three leads to a combinatorial explosion where you have to test tons of different cases with each separate argument.  
+* A “good” function is one you can read top-to-bottom without mental context switching.
+* Favor **one level of abstraction per function**: either orchestrate steps *or* implement a step, not both. (Keep this from the original.) ([GitHub][1])
 
-One or two arguments is the ideal case, and three should be avoided if possible. Anything more than that should be consolidated.
-Usually, if you have more than two arguments then your function is trying to do too much.
-In cases where it's not, most of the time a higher-level object will suffice as an argument.  
+**Heuristic**
 
-Consider using object literals if you are finding yourself needing a lot of arguments.  
+* Pure helpers: ~5–20 lines
+* Domain transforms/validators: ~20–60 lines
+* Orchestrators (handlers, use-cases): can be longer (even 60–120) **if** they stay at one abstraction level and remain linear with guard clauses.
 
-To make it obvious what properties the function expects, you can use the [destructuring](https://basarat.gitbook.io/typescript/future-javascript/destructuring) syntax.
-This has a few advantages:
+## 2) Parameters: clarity over counting
 
-1. When someone looks at the function signature, it's immediately clear what properties are being used.
-
-2. It can be used to simulate named parameters.
-
-3. Destructuring also clones the specified primitive values of the argument object passed into the function. This can help prevent side effects. Note: objects and arrays that are destructured from the argument object are NOT cloned.
-
-4. TypeScript warns you about unused properties, which would be impossible without destructuring.
-
-**Bad:**
+* Prefer **≤ 3–4 parameters**. If you need more, use a typed object to simulate named params. (Keep the named-object advice; drop the “2 or fewer ideally” absolutism.) ([GitHub][1])
+* Use destructuring only when it improves readability and makes used fields explicit; avoid over-destructuring that hides data flow.
 
 ```ts
-function createMenu(title: string, body: string, buttonText: string, cancellable: boolean) {
-  // ...
-}
+type CreateUserOpts = {
+  email: string;
+  password: string;
+  inviteCode?: string;
+  notify?: boolean;
+};
 
-createMenu('Foo', 'Bar', 'Baz', true);
+function createUser(opts: CreateUserOpts) { /* ... */ }
 ```
 
-**Good:**
+## 3) Single responsibility, applied sensibly
+
+* Aim for **one reason to change** per function, but don’t explode code into dozens of 3-line wrappers. Extract when it buys you:
+  a) a better name, b) reuse, or c) easier testing.
+* Keep “what vs. how” separate: top-level use-case (what), helpers (how). (Keep the spirit of “do one thing,” but with nuance.) ([GitHub][1])
 
 ```ts
-function createMenu(options: { title: string, body: string, buttonText: string, cancellable: boolean }) {
-  // ...
-}
-
-createMenu({
-  title: 'Foo',
-  body: 'Bar',
-  buttonText: 'Baz',
-  cancellable: true
-});
-```
-
-You can further improve readability by using [type aliases](https://www.typescriptlang.org/docs/handbook/advanced-types.html#type-aliases):
-
-```ts
-
-type MenuOptions = { title: string, body: string, buttonText: string, cancellable: boolean };
-
-function createMenu(options: MenuOptions) {
-  // ...
-}
-
-createMenu({
-  title: 'Foo',
-  body: 'Bar',
-  buttonText: 'Baz',
-  cancellable: true
-});
-```
-
-**[⬆ back to top](#table-of-contents)**
-
-### Functions should do one thing
-
-This is by far the most important rule in software engineering. When functions do more than one thing, they are harder to compose, test, and reason about. When you can isolate a function to just one action, it can be refactored easily and your code will read much cleaner. If you take nothing else away from this guide other than this, you'll be ahead of many developers.
-
-**Bad:**
-
-```ts
-function emailActiveClients(clients: Client[]) {
-  clients.forEach((client) => {
-    const clientRecord = database.lookup(client);
-    if (clientRecord.isActive()) {
-      email(client);
-    }
-  });
+async function registerUser(req: Request) {
+  const input = parseAndValidate(req.body);      // WHAT
+  const creds = await hashPassword(input.pw);    // WHAT
+  const user  = await saveUser(input.email, creds);
+  await maybeSendWelcome(user, input.notify);
+  return toDTO(user);
 }
 ```
 
-**Good:**
+## 4) Branching and flags
+
+* Prefer **guard clauses** over deep nesting. A guard clause is an early return that handles invalid input or edge cases up front, avoiding deep nesting.
+* Avoid **boolean mode flags** that fork behavior; split into separate functions or strategy objects. (Keep this.) ([GitHub][1])
 
 ```ts
-function emailActiveClients(clients: Client[]) {
-  clients.filter(isActiveClient).forEach(email);
-}
+function createTempFile(name: string) { return createFile(`./temp/${name}`); }
+// instead of createFile(name, /* temp */ true)
+```
 
-function isActiveClient(client: Client) {
-  const clientRecord = database.lookup(client);
-  return clientRecord.isActive();
+## 5) Side effects: localize and label them
+
+* Keep pure transforms pure; push I/O and mutation to the **edges** (gateways/services).
+* Don’t share mutable state across unrelated functions. (Keep the “avoid side effects / centralize them” advice.) ([GitHub][1])
+
+## 6) Names, readability, and discoverability
+
+* Names should state **intent and unit** of work (`addMonthToDate` > `addToDate`). (Keep.) ([GitHub][1])
+* If you need a long comment to explain a function, rename or refactor.
+
+## 7) Polymorphism vs. conditionals (use with judgment)
+
+* Prefer polymorphism when conditionals encode **type-based** branching.
+* Don’t introduce inheritance/strategies if a couple well-named `if`s are clearer. (Keep the example’s spirit but remove absolutism.) ([GitHub][1])
+
+## 8) DRY, but only with a correct abstraction
+
+* Remove duplication when a **stable** abstraction exists; otherwise duplication can be safer than a leaky “common” helper. (Soften the original’s “remove duplicate code” to prefer good abstractions.) ([GitHub][1])
+
+## 9) Errors and results
+
+* Prefer returning **typed results** (`Result<T, E>` or throwing domain errors handled at the edge).
+* Keep error handling at the same abstraction level as the function’s responsibility.
+
+## 10) Testing posture
+
+* Small pure helpers: unit test directly.
+* Orchestrators: test via narrow seams (mock gateways, not pure helpers).
+
+---
+
+### Example: cohesive orchestrator that’s “long enough” but low-friction
+
+```ts
+// Orchestrates at one level of abstraction; helpers hold the mechanics.
+export async function checkoutCart(input: CheckoutInput): Promise<OrderDTO> {
+  const cart = await loadCart(input.cartId);
+  if (cart.items.length === 0) throw badRequest('Empty cart');
+
+  const inventoryCheck = await ensureStock(cart.items);         // WHAT
+  const pricing = await priceCart(cart.items, input.discounts); // WHAT
+  const payment = await charge(pricing.total, input.payment);   // WHAT
+  const order   = await createOrder(cart, pricing, payment);    // WHAT
+
+  await scheduleFulfillment(order.id);                          // WHAT
+  return toOrderDTO(order);
 }
 ```
 
-**[⬆ back to top](#table-of-contents)**
+## 11) Dependencies and side effects
 
-### Function names should say what they do
-
-**Bad:**
-
-```ts
-function addToDate(date: Date, month: number): Date {
-  // ...
-}
-
-const date = new Date();
-
-// It's hard to tell from the function name what is added
-addToDate(date, 1);
-```
-
-**Good:**
+* Pass dependencies explicitly (ports) into orchestrators; avoid implicit singletons.
+* Keep I/O at the edges; keep pure helpers pure and deterministic.
 
 ```ts
-function addMonthToDate(date: Date, month: number): Date {
-  // ...
-}
+type EmailPort = { send(to: string, body: string): Promise<void> };
 
-const date = new Date();
-addMonthToDate(date, 1);
-```
+type UserRepo = { save(u: NewUser): Promise<User> };
 
-**[⬆ back to top](#table-of-contents)**
-
-### Functions should only be one level of abstraction
-
-When you have more than one level of abstraction your function is usually doing too much. Splitting up functions leads to reusability and easier testing.
-
-**Bad:**
-
-```ts
-function parseCode(code: string) {
-  const REGEXES = [ /* ... */ ];
-  const statements = code.split(' ');
-  const tokens = [];
-
-  REGEXES.forEach((regex) => {
-    statements.forEach((statement) => {
-      // ...
-    });
-  });
-
-  const ast = [];
-  tokens.forEach((token) => {
-    // lex...
-  });
-
-  ast.forEach((node) => {
-    // parse...
-  });
+async function registerUser(input: NewUser, deps: { email: EmailPort; repo: UserRepo }) {
+  const user = await deps.repo.save(input);
+  await deps.email.send(user.email, 'Welcome!');
+  return toDTO(user);
 }
 ```
 
-**Good:**
+## 12) Generics and types
+
+* Prefer constrained generics (`<T extends ...>`) over `any`; avoid over-generic helpers that hide intent.
+* Annotate public APIs’ return types explicitly; allow locals to be inferred.
+* Use `as const` and `satisfies` for intent and narrowing aids.
 
 ```ts
-const REGEXES = [ /* ... */ ];
+function identity<T extends { id: string }>(x: T): T { return x; }
 
-function parseCode(code: string) {
-  const tokens = tokenize(code);
-  const syntaxTree = parse(tokens);
+const CONFIG = { mode: 'prod', retries: 3 } as const;
 
-  syntaxTree.forEach((node) => {
-    // parse...
-  });
-}
+type Mode = typeof CONFIG.mode; // 'prod'
 
-function tokenize(code: string): Token[] {
-  const statements = code.split(' ');
-  const tokens: Token[] = [];
-
-  REGEXES.forEach((regex) => {
-    statements.forEach((statement) => {
-      tokens.push( /* ... */ );
-    });
-  });
-
-  return tokens;
-}
-
-function parse(tokens: Token[]): SyntaxTree {
-  const syntaxTree: SyntaxTree[] = [];
-  tokens.forEach((token) => {
-    syntaxTree.push( /* ... */ );
-  });
-
-  return syntaxTree;
-}
+const user: unknown = { id: 'u1', name: 'A' } satisfies { id: string; name: string };
 ```
 
-**[⬆ back to top](#table-of-contents)**
 
-### Remove duplicate code
 
-Do your absolute best to avoid duplicate code.
-Duplicate code is bad because it means that there's more than one place to alter something if you need to change some logic.  
 
-Imagine if you run a restaurant and you keep track of your inventory: all your tomatoes, onions, garlic, spices, etc.
-If you have multiple lists that you keep this on, then all have to be updated when you serve a dish with tomatoes in them.
-If you only have one list, there's only one place to update!  
-
-Oftentimes you have duplicate code because you have two or more slightly different things, that share a lot in common, but their differences force you to have two or more separate functions that do much of the same things. Removing duplicate code means creating an abstraction that can handle this set of different things with just one function/module/class.  
-
-Getting the abstraction right is critical, that's why you should follow the [SOLID](#solid) principles. Bad abstractions can be worse than duplicate code, so be careful! Having said this, if you can make a good abstraction, do it! Don't repeat yourself, otherwise, you'll find yourself updating multiple places anytime you want to change one thing.
-
-**Bad:**
-
-```ts
-function showDeveloperList(developers: Developer[]) {
-  developers.forEach((developer) => {
-    const expectedSalary = developer.calculateExpectedSalary();
-    const experience = developer.getExperience();
-    const githubLink = developer.getGithubLink();
-
-    const data = {
-      expectedSalary,
-      experience,
-      githubLink
-    };
-
-    render(data);
-  });
-}
-
-function showManagerList(managers: Manager[]) {
-  managers.forEach((manager) => {
-    const expectedSalary = manager.calculateExpectedSalary();
-    const experience = manager.getExperience();
-    const portfolio = manager.getMBAProjects();
-
-    const data = {
-      expectedSalary,
-      experience,
-      portfolio
-    };
-
-    render(data);
-  });
-}
-```
-
-**Good:**
-
-```ts
-class Developer {
-  // ...
-  getExtraDetails() {
-    return {
-      githubLink: this.githubLink,
-    }
-  }
-}
-
-class Manager {
-  // ...
-  getExtraDetails() {
-    return {
-      portfolio: this.portfolio,
-    }
-  }
-}
-
-function showEmployeeList(employee: (Developer | Manager)[]) {
-  employee.forEach((employee) => {
-    const expectedSalary = employee.calculateExpectedSalary();
-    const experience = employee.getExperience();
-    const extra = employee.getExtraDetails();
-
-    const data = {
-      expectedSalary,
-      experience,
-      extra,
-    };
-
-    render(data);
-  });
-}
-```
-
-You may also consider adding a union type, or common parent class if it suits your abstraction.
-```ts
-class Developer {
-  // ...
-}
-
-class Manager {
-  // ...
-}
-
-type Employee = Developer | Manager
-
-function showEmployeeList(employee: Employee[]) {
-  // ...
-  });
-}
-
-```
-
-You should be critical about code duplication. Sometimes there is a tradeoff between duplicated code and increased complexity by introducing unnecessary abstraction. When two implementations from two different modules look similar but live in different domains, duplication might be acceptable and preferred over extracting the common code. The extracted common code, in this case, introduces an indirect dependency between the two modules.
-
-**[⬆ back to top](#table-of-contents)**
 
 ### Set default objects with Object.assign or destructuring
 
@@ -926,7 +776,7 @@ if (!isEmailUsed(email)) {
 
 ### Avoid conditionals
 
-This seems like an impossible task. Upon first hearing this, most people say, "how am I supposed to do anything without an `if` statement?" The answer is that you can use polymorphism to achieve the same task in many cases. The second question is usually, "well that's great but why would I want to do that?" The answer is a previous clean code concept we learned: a function should only do one thing. When you have classes and functions that have `if` statements, you are telling your user that your function does more than one thing. Remember, just do one thing.
+Prefer polymorphism and discriminated unions where they model type-based branching more clearly than `if` chains. Otherwise prefer simple, well-named conditionals with guard clauses.
 
 **Bad:**
 
@@ -989,11 +839,9 @@ class Cessna extends Airplane {
 
 **[⬆ back to top](#table-of-contents)**
 
-### Avoid type checking
+### Prefer discriminated unions and exhaustive switching
 
-TypeScript is a strict syntactical superset of JavaScript and adds optional static type checking to the language.
-Always prefer to specify types of variables, parameters and return values to leverage the full power of TypeScript features.
-It makes refactoring more easier.
+TypeScript is a strict syntactical superset of JavaScript and adds optional static type checking to the language. Prefer discriminated unions and exhaustive `switch` over ad-hoc runtime type checks.
 
 **Bad:**
 
@@ -1010,32 +858,33 @@ function travelToTexas(vehicle: Bicycle | Car) {
 **Good:**
 
 ```ts
-type Vehicle = Bicycle | Car;
+type Vehicle =
+  | { kind: 'bicycle'; pedal(from: Location, to: Location): void }
+  | { kind: 'car'; drive(from: Location, to: Location): void };
 
 function travelToTexas(vehicle: Vehicle) {
-  vehicle.move(currentLocation, new Location('texas'));
+  switch (vehicle.kind) {
+    case 'bicycle':
+      return vehicle.pedal(currentLocation, new Location('texas'));
+    case 'car':
+      return vehicle.drive(currentLocation, new Location('texas'));
+    default: {
+      const _exhaustive: never = vehicle;
+      return _exhaustive;
+    }
+  }
 }
 ```
-
 **[⬆ back to top](#table-of-contents)**
 
 ### Don't over-optimize
 
-Modern browsers do a lot of optimization under-the-hood at runtime. A lot of times, if you are optimizing then you are just wasting your time. There are good [resources](https://github.com/petkaantonov/bluebird/wiki/Optimization-killers) for seeing where optimization is lacking. Target those in the meantime, until they are fixed if they can be.
-
-**Bad:**
-
-```ts
-// On old browsers, each iteration with uncached `list.length` would be costly
-// because of `list.length` recomputation. In modern browsers, this is optimized.
-for (let i = 0, len = list.length; i < len; i++) {
-  // ...
-}
-```
+Avoid micro-optimizations unless profiling shows a real bottleneck. Prefer clear code first; measure with a profiler, then optimize the hot path.
 
 **Good:**
 
 ```ts
+// Clear code first; optimize when profiling proves it's hot.
 for (let i = 0; i < list.length; i++) {
   // ...
 }
@@ -1161,17 +1010,9 @@ itiriri(fibonacci())
 
 ## Objects and Data Structures
 
-### Use getters and setters
+### Use getters and setters only to enforce invariants
 
-TypeScript supports getter/setter syntax.
-Using getters and setters to access data from objects that encapsulate behavior could be better than simply looking for a property on an object.
-"Why?" you might ask. Well, here's a list of reasons:
-
-- When you want to do more beyond getting an object property, you don't have to look up and change every accessor in your codebase.
-- Makes adding validation simple when doing a `set`.
-- Encapsulates the internal representation.
-- Easy to add logging and error handling when getting and setting.
-- You can lazy load your object's properties, let's say getting it from a server.
+TypeScript supports getter/setter syntax. Prefer plain objects and pure functions by default; use getters/setters when you need to enforce invariants, validation, or lazily compute derived values behind an API. Avoid for simple DTOs.
 
 **Bad:**
 
@@ -1204,23 +1045,23 @@ class BankAccount {
     return this.accountBalance;
   }
 
-  set balance(value: number) {
-    if (value < 0) {
-      throw new Error('Cannot set negative balance.');
-    }
+  deposit(amount: number): void {
+    if (amount <= 0) throw new Error('Deposit must be positive.');
+    this.accountBalance += amount;
+  }
 
-    this.accountBalance = value;
+  withdraw(amount: number): void {
+    if (amount <= 0) throw new Error('Withdrawal must be positive.');
+    if (this.accountBalance - amount < 0) throw new Error('Insufficient funds.');
+    this.accountBalance -= amount;
   }
 
   // ...
 }
 
-// Now `BankAccount` encapsulates the validation logic.
-// If one day the specifications change, and we need extra validation rule,
-// we would have to alter only the `setter` implementation,
-// leaving all dependent code unchanged.
+// Now `BankAccount` encapsulates the validation logic with intention-revealing methods.
 const account = new BankAccount();
-account.balance = 100;
+account.deposit(100);
 ```
 
 **[⬆ back to top](#table-of-contents)**
@@ -1424,6 +1265,43 @@ class Square implements Shape {
 
 **[⬆ back to top](#table-of-contents)**
 
+## When to use classes vs. functions (TypeScript)
+
+Default to functions; reach for classes when needed.
+
+- Use a class when:
+  - You must enforce invariants on construction and over time (encapsulated state, rich domain objects).
+  - Consumers need runtime identity/nominal typing (`instanceof`), decorators, or DI frameworks that expect classes (e.g., NestJS).
+  - You expose a stable OO API (SDK-like), or need a fluent builder with internal mutation hidden behind a final `build()`.
+
+- Prefer functions + types when:
+  - It’s primarily data-in → data-out logic (parsers, validators, formatters, pricing rules, mappers) — favors immutability and testability.
+  - Behavior varies by “kind” (use discriminated unions + exhaustive `switch`, not subclassing).
+  - You can compose small pure helpers and push I/O to edges (gateways/services).
+  - You only need a DTO/record (use `type`/`interface`, no getters/setters).
+  - “State” is ephemeral and can be returned instead of mutated (immutable updates).
+
+Example (discriminated union vs subclassing):
+
+```ts
+type CartItem =
+  | { kind: 'physical'; weightKg: number }
+  | { kind: 'digital' }
+  | { kind: 'giftcard'; amount: number };
+
+function shippingCost(item: CartItem): number {
+  switch (item.kind) {
+    case 'physical': return item.weightKg * 5;
+    case 'digital': return 0;
+    case 'giftcard': return 0;
+    default: {
+      const _exhaustive: never = item;
+      return _exhaustive;
+    }
+  }
+}
+```
+
 ## Classes
 
 ### Classes should be small
@@ -1519,8 +1397,8 @@ class UserService {
   constructor(private readonly db: Database) {
   }
 
-  async getUser(id: number): Promise<User> {
-    return await this.db.users.findOne({ id });
+  async getUser(userId: number): Promise<User> {
+    return await this.db.users.findOne({ userId });
   }
 
   async getTransactions(userId: number): Promise<Transaction[]> {
@@ -1618,6 +1496,8 @@ class EmployeeTaxData {
 **[⬆ back to top](#table-of-contents)**
 
 ### Use method chaining
+
+Use sparingly; prefer when it improves clarity for builders/DSLs, and avoid when it hides mutation or makes order dependence non-obvious.
 
 This pattern is very useful and commonly used in many libraries. It allows your code to be expressive, and less verbose. For that reason, use method chaining and take a look at how clean your code will be.
 
@@ -2145,8 +2025,7 @@ const report = await reader.read('report.json');
 ## Testing
 
 Testing is more important than shipping. If you have no tests or an inadequate amount, then every time you ship code you won't be sure that you didn't break anything.
-Deciding on what constitutes an adequate amount is up to your team, but having 100% coverage (all statements and branches)
-is how you achieve very high confidence and developer peace of mind. This means that in addition to having a great testing framework, you also need to use a good [coverage tool](https://github.com/gotwarlost/istanbul).
+Deciding on what constitutes an adequate amount is up to your team. Coverage is a useful signal, but focus on meaningful scenarios over chasing 100% statement coverage. Use coverage to find blind spots; consider mutation testing or property-based testing for deeper confidence. This means that in addition to having a great testing framework, you also need to use a good [coverage tool](https://github.com/gotwarlost/istanbul).
 
 There's no excuse to not write tests. There are [plenty of good JS test frameworks](http://jstherightway.org/#testing-tools) with typings support for TypeScript, so find one that your team prefers. When you find one that works for your team, then aim to always write tests for every new feature/module you introduce. If your preferred method is Test Driven Development (TDD), that is great, but the main point is to just make sure you are reaching your coverage goals before launching any feature, or refactoring an existing one.  
 
@@ -2926,29 +2805,5 @@ function getActiveSubscriptions(): Promise<Subscription[]> {
   return db.subscriptions.find({ dueDate: { $lte: new Date() } });
 }
 ```
-
-**[⬆ back to top](#table-of-contents)**
-
-## Translations
-
-This is also available in other languages:
-- ![br](https://raw.githubusercontent.com/gosquared/flags/master/flags/flags/shiny/24/Brazil.png) **Brazilian Portuguese**: [vitorfreitas/clean-code-typescript](https://github.com/vitorfreitas/clean-code-typescript)
-- ![cn](https://raw.githubusercontent.com/gosquared/flags/master/flags/flags/shiny/24/China.png) **Chinese**: 
-  - [beginor/clean-code-typescript](https://github.com/beginor/clean-code-typescript)
-  - [pipiliang/clean-code-typescript](https://github.com/pipiliang/clean-code-typescript)
-- ![fr](https://raw.githubusercontent.com/gosquared/flags/master/flags/flags/shiny/24/France.png) **French**: [ralflorent/clean-code-typescript](https://github.com/ralflorent/clean-code-typescript)
-- ![de](https://raw.githubusercontent.com/gosquared/flags/master/flags/flags/shiny/24/Germany.png) **German**: [mheob/clean-code-typescript](https://github.com/mheob/clean-code-typescript)
-- ![it](https://raw.githubusercontent.com/gosquared/flags/master/flags/flags/shiny/24/Italy.png) **Italian**: [Kornil/clean-code-typescript](https://github.com/kornil/clean-code-typescript)
-- ![ja](https://raw.githubusercontent.com/gosquared/flags/master/flags/flags/shiny/24/Japan.png) **Japanese**: [MSakamaki/clean-code-typescript](https://github.com/MSakamaki/clean-code-typescript)
-- ![ko](https://raw.githubusercontent.com/gosquared/flags/master/flags/flags/shiny/24/South-Korea.png) **Korean**: [738/clean-code-typescript](https://github.com/738/clean-code-typescript)
-- ![ru](https://raw.githubusercontent.com/gosquared/flags/master/flags/flags/shiny/24/Russia.png) **Russian**: [Real001/clean-code-typescript](https://github.com/Real001/clean-code-typescript)
-- ![es](https://raw.githubusercontent.com/gosquared/flags/master/flags/flags/shiny/24/Spain.png) **Spanish**: [3xp1o1t/clean-code-typescript](https://github.com/3xp1o1t/clean-code-typescript)
-- ![tr](https://raw.githubusercontent.com/gosquared/flags/master/flags/flags/shiny/24/Turkey.png) **Turkish**: [ozanhonamlioglu/clean-code-typescript](https://github.com/ozanhonamlioglu/clean-code-typescript)
-- ![uk](https://raw.githubusercontent.com/gosquared/flags/master/flags/flags/shiny/24/Ukraine.png) **Ukrainian**: [KirillPd/clean-code-typescript](https://github.com/KirillPd/clean-code-typescript)
-- ![vi](https://raw.githubusercontent.com/gosquared/flags/master/flags/flags/shiny/24/Vietnam.png) **Vietnamese**: [hoangsetup/clean-code-typescript](https://github.com/hoangsetup/clean-code-typescript)
-
-References will be added once translations are completed.  
-Check this [discussion](https://github.com/labs42io/clean-code-typescript/issues/15) for more details and progress.
-You can make an indispensable contribution to *Clean Code* community by translating this to your language.
 
 **[⬆ back to top](#table-of-contents)**
