@@ -13,6 +13,13 @@
   9. [Formatting](#formatting)
   10. [Comments](#comments)
 
+## Introduction
+
+Project stack:
+- React + Vite + Tailwind CSS
+- Hono API + Supabase (auth, DB, storage, RPC)
+- Playwright for end-to-end tests
+
 ## Variables
 
 ### Use meaningful variable names
@@ -312,6 +319,39 @@ function calculate(user: User, store: Store) {
 ```
 
 ## Functions
+### Avoid nested ternary statements
+
+**Bad:**
+
+```ts
+const label = a ? (b ? 'X' : c ? 'Y' : 'Z') : 'W';
+```
+
+**Good:**
+
+```ts
+let label = 'W';
+if (a && b) label = 'X';
+else if (a && c) label = 'Y';
+```
+
+### Frontend ↔ Backend communication
+
+- Prefer Supabase library APIs and `supabase.rpc()` for DB and server-side logic.
+- Use `fetch()` to call Hono routes for everything else.
+
+```ts
+// Supabase RPC
+const { data, error } = await supabase.rpc('calculate_total', { cart_id });
+
+// Hono fetch
+const res = await fetch('/api/compute', { method: 'POST', body: JSON.stringify(input) });
+const json = await res.json();
+```
+
+### Avoid chain of computation in React
+
+Prefer computing derived values during render or with memoization instead of chaining effects. See React docs “You might not need an Effect”.
 
 ## 1) Optimize for cognitive load, not line count
 
@@ -1012,48 +1052,7 @@ account.deposit(100);
 
 **[⬆ back to top](#table-of-contents)**
 
-### Make objects have private/protected members
 
-TypeScript supports `public` *(default)*, `protected` and `private` accessors on class members.  
-
-**Bad:**
-
-```ts
-class Circle {
-  radius: number;
-  
-  constructor(radius: number) {
-    this.radius = radius;
-  }
-
-  perimeter() {
-    return 2 * Math.PI * this.radius;
-  }
-
-  surface() {
-    return Math.PI * this.radius * this.radius;
-  }
-}
-```
-
-**Good:**
-
-```ts
-class Circle {
-  constructor(private readonly radius: number) {
-  }
-
-  perimeter() {
-    return 2 * Math.PI * this.radius;
-  }
-
-  surface() {
-    return Math.PI * this.radius * this.radius;
-  }
-}
-```
-
-**[⬆ back to top](#table-of-contents)**
 
 ### Prefer immutability
 
@@ -1250,197 +1249,6 @@ function shippingCost(item: CartItem): number {
 
 ## Classes
 
-### Classes should be small
-
-The class' size is measured by its responsibility. Following the *Single Responsibility principle* a class should be small.
-
-**Bad:**
-
-```ts
-class Dashboard {
-  getLanguage(): string { /* ... */ }
-  setLanguage(language: string): void { /* ... */ }
-  showProgress(): void { /* ... */ }
-  hideProgress(): void { /* ... */ }
-  isDirty(): boolean { /* ... */ }
-  disable(): void { /* ... */ }
-  enable(): void { /* ... */ }
-  addSubscription(subscription: Subscription): void { /* ... */ }
-  removeSubscription(subscription: Subscription): void { /* ... */ }
-  addUser(user: User): void { /* ... */ }
-  removeUser(user: User): void { /* ... */ }
-  goToHomePage(): void { /* ... */ }
-  updateProfile(details: UserDetails): void { /* ... */ }
-  getVersion(): string { /* ... */ }
-  // ...
-}
-
-```
-
-**Good:**
-
-```ts
-class Dashboard {
-  disable(): void { /* ... */ }
-  enable(): void { /* ... */ }
-  getVersion(): string { /* ... */ }
-}
-
-// split the responsibilities by moving the remaining methods to other classes
-// ...
-```
-
-**[⬆ back to top](#table-of-contents)**
-
-### High cohesion and low coupling
-
-Cohesion defines the degree to which class members are related to each other. Ideally, all fields within a class should be used by each method.
-We then say that the class is *maximally cohesive*. In practice, this, however, is not always possible, nor even advisable. You should however prefer cohesion to be high.  
-
-Coupling refers to how related or dependent are two classes toward each other. Classes are said to be low coupled if changes in one of them don't affect the other one.  
-  
-Good software design has **high cohesion** and **low coupling**.
-
-**Bad:**
-
-```ts
-class UserManager {
-  // Bad: each private variable is used by one or another group of methods.
-  // It makes clear evidence that the class is holding more than a single responsibility.
-  // If I need only to create the service to get the transactions for a user,
-  // I'm still forced to pass and instance of `emailSender`.
-  constructor(
-    private readonly db: Database,
-    private readonly emailSender: EmailSender) {
-  }
-
-  async getUser(id: number): Promise<User> {
-    return await db.users.findOne({ id });
-  }
-
-  async getTransactions(userId: number): Promise<Transaction[]> {
-    return await db.transactions.find({ userId });
-  }
-
-  async sendGreeting(): Promise<void> {
-    await emailSender.send('Welcome!');
-  }
-
-  async sendNotification(text: string): Promise<void> {
-    await emailSender.send(text);
-  }
-
-  async sendNewsletter(): Promise<void> {
-    // ...
-  }
-}
-```
-
-**Good:**
-
-```ts
-class UserService {
-  constructor(private readonly db: Database) {
-  }
-
-  async getUser(userId: number): Promise<User> {
-    return await this.db.users.findOne({ userId });
-  }
-
-  async getTransactions(userId: number): Promise<Transaction[]> {
-    return await this.db.transactions.find({ userId });
-  }
-}
-
-class UserNotifier {
-  constructor(private readonly emailSender: EmailSender) {
-  }
-
-  async sendGreeting(): Promise<void> {
-    await this.emailSender.send('Welcome!');
-  }
-
-  async sendNotification(text: string): Promise<void> {
-    await this.emailSender.send(text);
-  }
-
-  async sendNewsletter(): Promise<void> {
-    // ...
-  }
-}
-```
-
-**[⬆ back to top](#table-of-contents)**
-
-### Prefer composition over inheritance
-
-As stated famously in [Design Patterns](https://en.wikipedia.org/wiki/Design_Patterns) by the Gang of Four, you should *prefer composition over inheritance* where you can. There are lots of good reasons to use inheritance and lots of good reasons to use composition. The main point for this maxim is that if your mind instinctively goes for inheritance, try to think if composition could model your problem better. In some cases it can.  
-  
-You might be wondering then, "when should I use inheritance?" It depends on your problem at hand, but this is a decent list of when inheritance makes more sense than composition:
-
-1. Your inheritance represents an "is-a" relationship and not a "has-a" relationship (Human->Animal vs. User->UserDetails).
-
-2. You can reuse code from the base classes (Humans can move like all animals).
-
-3. You want to make global changes to derived classes by changing a base class. (Change the caloric expenditure of all animals when they move).
-
-**Bad:**
-
-```ts
-class Employee {
-  constructor(
-    private readonly name: string,
-    private readonly email: string) {
-  }
-
-  // ...
-}
-
-// Bad because Employees "have" tax data. EmployeeTaxData is not a type of Employee
-class EmployeeTaxData extends Employee {
-  constructor(
-    name: string,
-    email: string,
-    private readonly ssn: string,
-    private readonly salary: number) {
-    super(name, email);
-  }
-
-  // ...
-}
-```
-
-**Good:**
-
-```ts
-class Employee {
-  private taxData: EmployeeTaxData;
-
-  constructor(
-    private readonly name: string,
-    private readonly email: string) {
-  }
-
-  setTaxData(ssn: string, salary: number): Employee {
-    this.taxData = new EmployeeTaxData(ssn, salary);
-    return this;
-  }
-
-  // ...
-}
-
-class EmployeeTaxData {
-  constructor(
-    public readonly ssn: string,
-    public readonly salary: number) {
-  }
-
-  // ...
-}
-```
-
-**[⬆ back to top](#table-of-contents)**
-
 ### Use method chaining
 
 Use sparingly; prefer when it improves clarity for builders/DSLs, and avoid when it hides mutation or makes order dependence non-obvious.
@@ -1526,21 +1334,33 @@ const query = new QueryBuilder()
 **[⬆ back to top](#table-of-contents)**
 
 ## Testing
+### Flaky tests policy (project standard)
+
+- Do not rerun to green; fix or quarantine immediately.
+- If a timeout caused a failure, raise it narrowly for the exact step.
+- Distinguish external outage vs. product failure; mark or mock accordingly.
+- Mock external services in tests not focusing on those features; keep one E2E per critical feature that exercises the real service.
+
+```ts
+// Increase timeout only for a flaky step
+await page.getByRole('button', { name: 'Upload' }).click({ timeout: 15_000 });
+
+// Mock external request where the test doesn’t target inference
+await page.route('**/inference*', route => route.fulfill({
+  status: 200,
+  contentType: 'application/json',
+  body: JSON.stringify({ result: 'stubbed' }),
+}));
+
+// Fail fast to disambiguate external outage
+await page.route('**/external/*', route => route.abort('internetdisconnected'));
+```
 
 Testing is more important than shipping. If you have no tests or an inadequate amount, then every time you ship code you won't be sure that you didn't break anything.
 Deciding on what constitutes an adequate amount is up to your team. Coverage is a useful signal, but focus on meaningful scenarios over chasing 100% statement coverage. Use coverage to find blind spots; consider mutation testing or property-based testing for deeper confidence. This means that in addition to having a great testing framework, you also need to use a good [coverage tool](https://github.com/gotwarlost/istanbul).
 
 There's no excuse to not write tests. There are [plenty of good JS test frameworks](http://jstherightway.org/#testing-tools) with typings support for TypeScript, so find one that your team prefers. When you find one that works for your team, then aim to always write tests for every new feature/module you introduce. If your preferred method is Test Driven Development (TDD), that is great, but the main point is to just make sure you are reaching your coverage goals before launching any feature, or refactoring an existing one.  
 
-### The three laws of TDD
-
-1. You are not allowed to write any production code unless it is to make a failing unit test pass.
-
-2. You are not allowed to write any more of a unit test than is sufficient to fail, and; compilation failures are failures.
-
-3. You are not allowed to write any more production code than is sufficient to pass the one failing unit test.
-
-**[⬆ back to top](#table-of-contents)**
 
 ### F.I.R.S.T. rules
 
@@ -1762,6 +1582,28 @@ try {
 **[⬆ back to top](#table-of-contents)**
 
 ## Error Handling
+### Prefer Result objects over thrown errors (project standard)
+
+Return `{ data, error }` instead of throwing for expected failures. Use local `try/catch` only when necessary (e.g., `JSON.parse`).
+
+```ts
+type AppError = { code: string; message: string; cause?: unknown };
+type Result<T> = { data: T | null; error: AppError | null };
+
+function ok<T>(data: T): Result<T> { return { data, error: null }; }
+function fail<T = never>(error: AppError): Result<T> { return { data: null, error }; }
+
+async function getUserById(id: string): Promise<Result<User>> {
+  const { data, error } = await supabase.from('users').select('*').eq('id', id).single();
+  if (error) return fail({ code: 'db_error', message: error.message, cause: error });
+  return ok(data);
+}
+
+function parseJson<T>(text: string): Result<T> {
+  try { return ok(JSON.parse(text) as T); }
+  catch (cause) { return fail({ code: 'parse_error', message: 'Invalid JSON', cause }); }
+}
+```
 
 Thrown errors are a good thing! They mean the runtime has successfully identified when something in your program has gone wrong and it's letting you know by stopping function
 execution on the current stack, killing the process (in Node), and notifying you in the console with a stack trace.
