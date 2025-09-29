@@ -1462,6 +1462,50 @@ describe('Calendar', () => {
 
 **[⬆ back to top](#table-of-contents)**
 
+### Prefer named locators over in-line chaining (Playwright)
+
+- Create a `Locator`, assign it to a well-named constant, then perform actions. This improves readability, enables reuse, and clarifies intent.
+- This aligns with Playwright’s Locators API guidance: see [Best practices](https://playwright.dev/docs/best-practices) and [Locators](https://playwright.dev/docs/locators). Example pattern from docs:
+
+```ts
+const button = page.locator('button');
+await button.click();
+```
+
+**Bad (hard to scan):**
+
+```ts
+await page
+  .locator('#desktop-documents-panel')
+  .getByRole('listitem')
+  .filter({ hasText: folder })
+  .locator('label')
+  .click();
+await page
+  .getByRole('button', { name: 'Löschen Mülleimer-Icon' })
+  .click();
+await page.getByRole('button', { name: 'Löschen', exact: true }).click();
+```
+
+**Good (clear intent, easy to reuse):**
+
+```ts
+const folderCheckbox = page
+  .locator('#desktop-documents-panel')
+  .getByRole('listitem')
+  .filter({ hasText: folder })
+  .locator('label');
+await folderCheckbox.click();
+
+const deleteButton = page.getByRole('button', { name: 'Löschen Mülleimer-Icon' });
+await deleteButton.click();
+
+const confirmButton = page.getByRole('button', { name: 'Löschen', exact: true });
+await confirmButton.click();
+```
+
+**[⬆ back to top](#table-of-contents)**
+
 ## Concurrency
 
 ### Prefer promises vs callbacks
